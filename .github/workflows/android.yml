@@ -1,10 +1,8 @@
-
 name: Build Padium APK
 
 'on':
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,37 +21,38 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
+      - name: Set up Android SDK command-line tools
         shell: bash
         run: |
-          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/padium-android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -fL --retry 3 -o "$RUNNER_TEMP/android-tools.zip" "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          unzip -q "$RUNNER_TEMP/android-tools.zip" -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
-          MANAGER=$(find "$SDK/cmdline-tools" \
-            -type f -name sdkmanager \
-            2>/dev/null | head -n 1)
-
-          if [ -z "$MANAGER" ]; then
-            echo "sdkmanager not found"
-            exit 1
-          fi
-
-          echo "Using $MANAGER"
-
-          "$MANAGER" --sdk_root="$SDK" \
-            --install \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Set up Gradle
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-      - name: Build Padium APK
-        run: gradle --no-daemon assembleDebug
+      - name: Verify project
+        run: |
+          test -f settings.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/java/com/padium/browser/MainActivity.kt
+
+      - name: Build debug APK
+        run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Padium-APK
+          name: Padium-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
